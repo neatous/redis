@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<ruleset name="Netous">
+	<description>Coding standard for netous/redis</description>
+
+	<arg name="extensions" value="php"/>
+	<arg name="tab-width" value="4"/>
+	<arg value="sp"/>
+
+	<file>src</file>
+	<file>tests</file>
+
+	<!-- PSR-12 base -->
+	<rule ref="PSR12">
+		<exclude name="Generic.WhiteSpace.DisallowTabIndent"/>
+	</rule>
+	<rule ref="Generic.WhiteSpace.DisallowSpaceIndent"/>
+
+	<!-- Slevomat Coding Standard -->
+
+	<!-- Unused uses -->
+	<rule ref="SlevomatCodingStandard.Namespaces.UnusedUses">
+		<properties>
+			<property name="searchAnnotations" value="true"/>
+		</properties>
+	</rule>
+	<rule ref="SlevomatCodingStandard.Namespaces.UseFromSameNamespace"/>
+	<rule ref="SlevomatCodingStandard.Namespaces.UselessAlias"/>
+
+	<!-- Use sorting -->
+	<rule ref="SlevomatCodingStandard.Namespaces.AlphabeticallySortedUses"/>
+	<rule ref="SlevomatCodingStandard.Namespaces.DisallowGroupUse"/>
+
+	<!-- Type hints -->
+	<rule ref="SlevomatCodingStandard.TypeHints.DeclareStrictTypes">
+		<properties>
+			<property name="spacesCountAroundEqualsSign" value="0"/>
+		</properties>
+	</rule>
+	<rule ref="SlevomatCodingStandard.TypeHints.ParameterTypeHint"/>
+	<rule ref="SlevomatCodingStandard.TypeHints.PropertyTypeHint"/>
+	<rule ref="SlevomatCodingStandard.TypeHints.ReturnTypeHint"/>
+	<rule ref="SlevomatCodingStandard.TypeHints.UselessConstantTypeHint"/>
+	<rule ref="SlevomatCodingStandard.TypeHints.DNFTypeHintFormat"/>
+	<rule ref="SlevomatCodingStandard.TypeHints.NullableTypeForNullDefaultValue"/>
+
+	<!-- Classes -->
+	<rule ref="SlevomatCodingStandard.Classes.ClassConstantVisibility"/>
+	<rule ref="SlevomatCodingStandard.Classes.ModernClassNameReference"/>
+	<rule ref="SlevomatCodingStandard.Classes.TraitUseSpacing">
+		<properties>
+			<property name="linesCountBeforeFirstUse" value="0"/>
+			<property name="linesCountAfterLastUse" value="1"/>
+		</properties>
+	</rule>
+	<rule ref="SlevomatCodingStandard.Classes.UselessLateStaticBinding"/>
+
+	<!-- Control structures -->
+	<rule ref="SlevomatCodingStandard.ControlStructures.DisallowYodaComparison"/>
+	<rule ref="SlevomatCodingStandard.ControlStructures.RequireNullCoalesceOperator"/>
+	<rule ref="SlevomatCodingStandard.ControlStructures.RequireNullCoalesceEqualOperator"/>
+	<rule ref="SlevomatCodingStandard.ControlStructures.EarlyExit"/>
+	<rule ref="SlevomatCodingStandard.ControlStructures.UselessIfConditionWithReturn"/>
+	<rule ref="SlevomatCodingStandard.ControlStructures.UselessTernaryOperator"/>
+
+	<!-- Functions -->
+	<rule ref="SlevomatCodingStandard.Functions.UnusedParameter">
+		<properties>
+			<property name="allowedParameterPatterns" type="array">
+				<element value="/^_/"/>
+			</property>
+		</properties>
+	</rule>
+	<rule ref="SlevomatCodingStandard.Functions.StaticClosure"/>
+	<rule ref="SlevomatCodingStandard.Functions.RequireTrailingCommaInCall"/>
+	<rule ref="SlevomatCodingStandard.Functions.RequireTrailingCommaInDeclaration"/>
+
+	<!-- PHP -->
+	<rule ref="SlevomatCodingStandard.PHP.UselessSemicolon"/>
+	<rule ref="SlevomatCodingStandard.PHP.UselessParentheses"/>
+	<rule ref="SlevomatCodingStandard.PHP.ShortList"/>
+
+	<!-- Spacing -->
+	<rule ref="SlevomatCodingStandard.Namespaces.NamespaceDeclaration"/>
+	<rule ref="SlevomatCodingStandard.Namespaces.NamespaceSpacing"/>
+	<rule ref="SlevomatCodingStandard.Namespaces.UseSpacing">
+		<properties>
+			<property name="linesCountBetweenUseTypes" value="1"/>
+		</properties>
+	</rule>
+
+	<!-- Whitespace -->
+	<rule ref="SlevomatCodingStandard.Whitespaces.DuplicateSpaces"/>
+
+	<!-- Operators -->
+	<rule ref="SlevomatCodingStandard.Operators.DisallowEqualOperators"/>
+
+	<!-- Clean code -->
+	<rule ref="SlevomatCodingStandard.Variables.UselessVariable"/>
+	<rule ref="SlevomatCodingStandard.Exceptions.DeadCatch"/>
+	<rule ref="SlevomatCodingStandard.Arrays.TrailingArrayComma"/>
+</ruleset>

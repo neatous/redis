@@ -1,0 +1,43 @@
+{
+	"name": "netous/redis",
+	"description": "Minimalist Redis integration for Nette cache and sessions using phpredis",
+	"type": "library",
+	"license": "MIT",
+	"require": {
+		"php": ">=8.4",
+		"ext-redis": ">=6.0",
+		"nette/caching": "^3.2",
+		"nette/di": "^3.1"
+	},
+	"suggest": {
+		"tracy/tracy": "For Redis panel in Tracy debugger bar"
+	},
+	"require-dev": {
+		"tracy/tracy": "^2.10",
+		"phpstan/phpstan": "^2.0",
+		"phpunit/phpunit": "^11.0",
+		"slevomat/coding-standard": "^8.15",
+		"squizlabs/php_codesniffer": "^3.7"
+	},
+	"autoload": {
+		"psr-4": {
+			"Netous\\Redis\\": "src/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"Netous\\Redis\\Tests\\": "tests/"
+		}
+	},
+	"extra": {
+		"branch-alias": {
+			"dev-main": "1.0.x-dev"
+		}
+	},
+	"config": {
+		"sort-packages": true,
+		"allow-plugins": {
+			"dealerdirect/phpcodesniffer-composer-installer": true
+		}
+	}
+}
