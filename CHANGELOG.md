@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1
+
+### Fixed
+- `Undefined constant Redis::SERIALIZER_IGBINARY` when phpredis is built without igbinary support: `RedisStorage`
+  could not be created at all. igbinary is now detected by the phpredis build, not by the loaded igbinary extension.
+
+### Other
+- `RedisFactory` throws `RedisException` when the serializer cannot be set.
+- CI: tests with phpredis built without igbinary support.
+- Development tools: PHPUnit 13, PHP_CodeSniffer 4, slevomat/coding-standard 8.31, PHPStan 2.3, Tracy 2.11.
+
 ## 0.10.0
 
 New storage format and BC breaks — see [UPGRADE.md](UPGRADE.md).
@@ -23,8 +34,6 @@ New storage format and BC breaks — see [UPGRADE.md](UPGRADE.md).
 - Session `save_path` lost `database`/`prefix` with a non-default `arg_separator.output`.
 - `timeout: 2` (integer) was rejected in the config.
 - Integer tags, negative and float priorities.
-- Undefined `Redis::SERIALIZER_IGBINARY` when phpredis is built without igbinary support; igbinary is now detected by
-  the phpredis build, not by the loaded extension.
 
 ### BC breaks
 - New storage format; 0.9 and 0.10 cannot share a Redis.
@@ -36,5 +45,5 @@ New storage format and BC breaks — see [UPGRADE.md](UPGRADE.md).
 - Requires `nette/caching` 3.3.1+ or 4.x and `nette/di` 3.2.3+.
 
 ### Other
-- CI: PHP 8.4/8.5/8.6 × nette/caching 3/4, lowest dependencies, both serializers, phpredis built without igbinary.
+- CI: PHP 8.4/8.5/8.6 × nette/caching 3/4, lowest dependencies, both serializers.
 - `vendor/` and `composer.lock` removed from the repository.
