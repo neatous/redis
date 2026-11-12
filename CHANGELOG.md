@@ -36,5 +36,5 @@ New storage format and BC breaks — see [UPGRADE.md](UPGRADE.md).
 - Requires `nette/caching` 3.3.1+ or 4.x and `nette/di` 3.2.3+.
 
 ### Other
-- CI: PHP 8.4/8.5/8.6 × nette/caching 3/4, lowest dependencies, both serializers.
+- CI: PHP 8.4/8.5/8.6 × nette/caching 3/4, lowest dependencies, both serializers, phpredis built without igbinary.
 - `vendor/` and `composer.lock` removed from the repository.
