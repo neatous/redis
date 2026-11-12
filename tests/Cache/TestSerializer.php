@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Netous\Redis\Tests\Cache;
 
+use Netous\Redis\Client\Serializer;
+use PHPUnit\Framework\Assert;
+
 /**
- * Lets the suite run with another serializer than the one RedisFactory picks (igbinary when loaded), so that the
- * PHP serializer path is tested too: REDIS_TEST_SERIALIZER=php vendor/bin/phpunit
+ * Lets the suite run with another serializer than the one RedisFactory picks (igbinary when phpredis supports it),
+ * so that the PHP serializer path is tested too: REDIS_TEST_SERIALIZER=php vendor/bin/phpunit
  */
 final class TestSerializer
 {
@@ -14,7 +17,8 @@ final class TestSerializer
 	{
 		$serializer = match (getenv('REDIS_TEST_SERIALIZER')) {
 			'php' => \Redis::SERIALIZER_PHP,
-			'igbinary' => \Redis::SERIALIZER_IGBINARY,
+			'igbinary' => Serializer::igbinary()
+				?? Assert::markTestSkipped('phpredis is built without igbinary support.'),
 			default => null,
 		};
 

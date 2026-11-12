@@ -8,7 +8,7 @@ Redis cache storage and sessions for Nette, using phpredis.
 
 ## Requirements
 
-- PHP 8.4+, ext-redis 6.0+ (ext-igbinary optional, used when available)
+- PHP 8.4+, ext-redis 6.0+ (igbinary is used when phpredis is built with its support, the PHP serializer otherwise)
 - `nette/caching` 3.3.1+ or 4.x, `nette/di` 3.2.3+
 - Redis 4+, standalone (no Cluster), Lua scripting allowed
 
@@ -80,6 +80,9 @@ $storage = new Netous\Redis\Cache\RedisStorage(
 - Sessions: the Redis password is part of `session.save_path`, which `phpinfo()` and Tracy's error page show. Restrict
   access to Tracy logs or set `Tracy\Debugger::getBlueScreen()->showEnvironment = false`.
 - A custom connection must use the PHP or igbinary serializer and no `Redis::OPT_PREFIX`; compression is supported.
+- The serializer depends on the phpredis build. Cache items written with the other serializer are read as misses, so
+  all servers sharing one Redis and prefix should use the same build. Values stored directly through the `Redis`
+  service are not converted.
 
 ## Testing
 
