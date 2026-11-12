@@ -15,31 +15,21 @@ final class RedisKeyBuilderTest extends TestCase
 	{
 		$builder = new RedisKeyBuilder('app:');
 
-		$key = $builder->build('myNamespace', 1, 'someKey');
+		$key = $builder->build('myNamespace', ['abc'], 'someKey');
 
-		self::assertSame('app:cache:myNamespace:1:' . sha1('someKey'), $key);
+		self::assertSame('app:cache2:i:myNamespace:abc:' . sha1('someKey'), $key);
 	}
 
 	#[Test]
-	public function buildWithDifferentVersions(): void
+	public function buildJoinsVersionsOfAncestors(): void
 	{
 		$builder = new RedisKeyBuilder('app:');
 
-		$v1 = $builder->build('ns', 1, 'key');
-		$v2 = $builder->build('ns', 2, 'key');
+		$key = $builder->build("parent\x00child", ['v1', 'v2'], 'key');
 
-		self::assertNotSame($v1, $v2);
+		self::assertSame("app:cache2:i:parent\x00child:v1.v2:" . sha1('key'), $key);
 	}
 
-	#[Test]
-	public function buildWithEmptyNamespace(): void
-	{
-		$builder = new RedisKeyBuilder('app:');
-
-		$key = $builder->build('', 1, 'key');
-
-		self::assertSame('app:cache::1:' . sha1('key'), $key);
-	}
 
 	#[Test]
 	public function buildVersionKeyFormat(): void
@@ -48,29 +38,40 @@ final class RedisKeyBuilderTest extends TestCase
 
 		$key = $builder->buildVersionKey('myNamespace');
 
-		self::assertSame('app:cache:ns:myNamespace', $key);
+		self::assertSame('app:cache2:ns:myNamespace', $key);
 	}
 
 	#[Test]
-	public function differentPrefixesProduceDifferentKeys(): void
+	public function cachePatternEscapesGlobCharacters(): void
 	{
-		$builder1 = new RedisKeyBuilder('app1:');
-		$builder2 = new RedisKeyBuilder('app2:');
-
-		self::assertNotSame(
-			$builder1->build('ns', 1, 'key'),
-			$builder2->build('ns', 1, 'key'),
-		);
+		self::assertSame('app:cache*', (new RedisKeyBuilder('app:'))->buildCacheRootsPattern());
+		self::assertSame('a\*b\?\[c\]:cache*', (new RedisKeyBuilder('a*b?[c]:'))->buildCacheRootsPattern());
 	}
 
+
 	#[Test]
-	public function hashIsDeterministic(): void
+	public function isCacheKeyAcceptsOnlyCacheRoots(): void
 	{
 		$builder = new RedisKeyBuilder('app:');
 
-		$key1 = $builder->build('ns', 1, 'sameKey');
-		$key2 = $builder->build('ns', 1, 'sameKey');
+		self::assertTrue($builder->isCacheKey('app:cache2:i:ns:v:' . sha1('x')));
+		self::assertTrue($builder->isCacheKey('app:cache:ns:1:' . sha1('x')));
+		self::assertFalse($builder->isCacheKey('app:cachefoo'));
+		self::assertFalse($builder->isCacheKey('app:session:abc'));
+	}
 
-		self::assertSame($key1, $key2);
+
+	#[Test]
+	public function parseItemKeyReturnsNamespaceAndVersions(): void
+	{
+		$builder = new RedisKeyBuilder('app:');
+
+		self::assertSame(
+			["a:b\x00c", ['v1', 'v2']],
+			$builder->parseItemKey($builder->build("a:b\x00c", ['v1', 'v2'], 'key')),
+		);
+		self::assertSame(['', []], $builder->parseItemKey($builder->build('', [], 'key')));
+		self::assertNull($builder->parseItemKey('app:cache2:ns:foo'));
+		self::assertNull($builder->parseItemKey('other:cache2:i:ns:v:' . sha1('x')));
 	}
 }

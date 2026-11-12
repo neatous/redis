@@ -11,16 +11,20 @@ class RedisFactory
 		$redis = new \Redis();
 
 		if ($config->persistent) {
-			$redis->pconnect($config->host, $config->port, $config->timeout);
+			// a persistent ID per database keeps clients of different databases on separate sockets even when
+			// phpredis' connection pooling (redis.pconnect.pooling_enabled) is disabled
+			$redis->pconnect($config->host, $config->port, $config->timeout, 'db' . $config->database);
 		} else {
 			$redis->connect($config->host, $config->port, $config->timeout);
 		}
 
-		if ($config->password !== null) {
-			$redis->auth($config->password);
+		if ($config->password !== null && $redis->auth($config->password) !== true) {
+			throw new \RedisException('Redis authentication failed: ' . $redis->getLastError());
 		}
 
-		$redis->select($config->database);
+		if ($redis->select($config->database) !== true) {
+			throw new \RedisException("Cannot select Redis database {$config->database}.");
+		}
 
 		$serializer = extension_loaded('igbinary')
 			? \Redis::SERIALIZER_IGBINARY

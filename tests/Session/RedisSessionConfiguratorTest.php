@@ -67,4 +67,41 @@ final class RedisSessionConfiguratorTest extends TestCase
 		$savePath = (string) ini_get('session.save_path');
 		self::assertStringContainsString('tcp://10.0.0.1:6380', $savePath);
 	}
+
+
+	#[Test]
+	public function configurePassesTimeoutAndPersistence(): void
+	{
+		RedisSessionConfigurator::configure(new RedisConfig(timeout: 2.5, persistent: true));
+
+		$savePath = (string) ini_get('session.save_path');
+		self::assertStringContainsString('timeout=2.5', $savePath);
+		self::assertStringContainsString('persistent=1', $savePath);
+	}
+
+
+	#[Test]
+	public function configureBracketsIpv6Host(): void
+	{
+		RedisSessionConfigurator::configure(new RedisConfig(host: '::1', port: 6380));
+
+		self::assertStringStartsWith('tcp://[::1]:6380?', (string) ini_get('session.save_path'));
+	}
+
+
+	#[Test]
+	public function savePathDoesNotDependOnArgSeparatorSetting(): void
+	{
+		$original = (string) ini_get('arg_separator.output');
+		ini_set('arg_separator.output', '&amp;');
+		try {
+			RedisSessionConfigurator::configure(new RedisConfig(password: 'secret', database: 5));
+		} finally {
+			ini_set('arg_separator.output', $original);
+		}
+
+		$savePath = (string) ini_get('session.save_path');
+		self::assertStringContainsString('auth=secret&database=5&prefix=', $savePath);
+		self::assertStringNotContainsString('&amp;', $savePath);
+	}
 }

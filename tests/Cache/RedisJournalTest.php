@@ -63,21 +63,6 @@ final class RedisJournalTest extends TestCase
 
 
 	#[Test]
-	public function cleanByTagDoesNotAffectOtherTags(): void
-	{
-		$this->journal->write('key1', [Cache::Tags => ['tag-a']]);
-		$this->journal->write('key2', [Cache::Tags => ['tag-b']]);
-
-		$removed = $this->journal->clean([Cache::Tags => ['tag-a']]);
-
-		self::assertSame(['key1'], $removed);
-
-		$remaining = $this->journal->clean([Cache::Tags => ['tag-b']]);
-		self::assertSame(['key2'], $remaining);
-	}
-
-
-	#[Test]
 	public function writeAndCleanByPriority(): void
 	{
 		$this->journal->write('low', [Cache::Priority => 10]);
@@ -137,32 +122,11 @@ final class RedisJournalTest extends TestCase
 
 
 	#[Test]
-	public function cleanWithNoMatchingTagsReturnsEmpty(): void
-	{
-		$this->journal->write('key1', [Cache::Tags => ['tag-a']]);
-
-		$removed = $this->journal->clean([Cache::Tags => ['nonexistent']]);
-		self::assertSame([], $removed);
-	}
-
-
-	#[Test]
-	public function cleanWithNoMatchingPriorityReturnsEmpty(): void
-	{
-		$this->journal->write('key1', [Cache::Priority => 100]);
-
-		$removed = $this->journal->clean([Cache::Priority => 5]);
-		self::assertSame([], $removed);
-	}
-
-
-	#[Test]
 	public function writeWithNoDependenciesIsNoOp(): void
 	{
 		$this->journal->write('key1', []);
 
-		$removed = $this->journal->clean([Cache::Tags => ['any']]);
-		self::assertSame([], $removed);
+		self::assertSame([], $this->redis->keys('*'));
 	}
 
 
@@ -188,5 +152,77 @@ final class RedisJournalTest extends TestCase
 
 		$removed = $this->journal->clean([Cache::Tags => ['tag-a']]);
 		self::assertSame(['key1'], $removed);
+	}
+
+
+	#[Test]
+	public function integerTagsCanBeWrittenAndCleaned(): void
+	{
+		$this->journal->write('key1', [Cache::Tags => [123]]);
+
+		self::assertSame(['key1'], $this->journal->clean([Cache::Tags => [123]]));
+	}
+
+
+	#[Test]
+	public function floatPriorityAndStringableTagsAreNormalized(): void
+	{
+		$tag = new class implements \Stringable {
+			public function __toString(): string
+			{
+				return 'stringable';
+			}
+		};
+		$this->journal->write('key1', [Cache::Priority => 5.0, Cache::Tags => [$tag]]);
+
+		self::assertSame(['key1'], $this->journal->clean([Cache::Priority => 5.9]));
+		$this->journal->write('key2', [Cache::Tags => [$tag]]);
+		self::assertSame(['key2'], $this->journal->clean([Cache::Tags => ['stringable']]));
+	}
+
+
+	#[Test]
+	public function emptyPrefixIsRejected(): void
+	{
+		$this->expectException(\Nette\InvalidArgumentException::class);
+
+		new RedisJournal($this->redis, '');
+	}
+
+
+	#[Test]
+	public function negativePriorityIsCleaned(): void
+	{
+		$this->journal->write('negative', [Cache::Priority => -5]);
+		$this->journal->write('high', [Cache::Priority => 50]);
+
+		self::assertSame(['negative'], $this->journal->clean([Cache::Priority => 10]));
+	}
+
+
+	#[Test]
+	public function cleanAllFalseDoesNotCleanAnything(): void
+	{
+		$this->journal->write('key1', [Cache::Tags => ['tag-a']]);
+
+		self::assertSame([], $this->journal->clean([Cache::All => false]));
+		self::assertSame(['key1'], $this->journal->clean([Cache::Tags => ['tag-a']]));
+	}
+
+
+	#[Test]
+	public function cleanAllKeepsKeysOfOtherPrefixes(): void
+	{
+		$this->redis->set('teXXt:journal:priority', 'foreign');
+		$this->redis->set('PHPREDIS_SESSION:abc', 'session');
+		$journal = new RedisJournal($this->redis, 'te*t:');
+		$journal->write('key1', [Cache::Tags => ['tag-a'], Cache::Priority => 1]);
+
+		self::assertNull($journal->clean([Cache::All => true]));
+
+		$keys = $this->redis->keys('*');
+		self::assertIsArray($keys);
+		sort($keys);
+		self::assertSame(['PHPREDIS_SESSION:abc', 'teXXt:journal:priority'], $keys);
 	}
 }
