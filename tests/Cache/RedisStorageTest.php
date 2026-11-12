@@ -9,6 +9,7 @@ use Netous\Redis\Cache\RedisKeyBuilder;
 use Netous\Redis\Cache\RedisStorage;
 use Netous\Redis\Client\RedisConfig;
 use Netous\Redis\Client\RedisFactory;
+use Netous\Redis\Client\Serializer;
 use Nette\Caching\Cache;
 use Nette\Caching\Storages\Journal;
 use Nette\InvalidArgumentException;
@@ -18,7 +19,8 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Storage-level behavior against a live Redis, using the production client from RedisFactory (igbinary when loaded).
+ * Storage-level behavior against a live Redis, using the production client from RedisFactory (igbinary when phpredis
+ * supports it).
  */
 final class RedisStorageTest extends TestCase
 {
@@ -556,6 +558,35 @@ final class RedisStorageTest extends TestCase
 		$this->expectException(InvalidArgumentException::class);
 
 		new RedisStorage($redis, new RedisKeyBuilder(self::PREFIX));
+	}
+
+
+	#[Test]
+	public function phpSerializerIsAcceptedInEveryBuild(): void
+	{
+		// must not depend on Redis::SERIALIZER_IGBINARY, which phpredis built without igbinary does not define
+		$this->redis->setOption(\Redis::OPT_SERIALIZER, \Redis::SERIALIZER_PHP);
+		$storage = $this->createStorage();
+
+		$storage->write("app\x00key", new \ArrayObject(['value']), []);
+
+		self::assertEquals(new \ArrayObject(['value']), $storage->read("app\x00key"));
+	}
+
+
+	#[Test]
+	public function itemWrittenWithAnotherSerializerIsMiss(): void
+	{
+		$igbinary = Serializer::igbinary() ?? self::markTestSkipped('phpredis is built without igbinary support.');
+
+		$this->redis->setOption(\Redis::OPT_SERIALIZER, \Redis::SERIALIZER_PHP);
+		$this->createStorage()->write("app\x00key", ['value'], []);
+		$this->redis->setOption(\Redis::OPT_SERIALIZER, $igbinary);
+		self::assertNull($this->createStorage()->read("app\x00key"), 'PHP item read with igbinary');
+
+		$this->createStorage()->write("app\x00key", ['value'], []);
+		$this->redis->setOption(\Redis::OPT_SERIALIZER, \Redis::SERIALIZER_PHP);
+		self::assertNull($this->createStorage()->read("app\x00key"), 'igbinary item read with PHP');
 	}
 
 

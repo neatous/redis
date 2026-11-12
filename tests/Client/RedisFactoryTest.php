@@ -45,10 +45,18 @@ final class RedisFactoryTest extends TestCase
 	{
 		$redis = (new RedisFactory())->create(new RedisConfig(database: self::DATABASE, timeout: 1.0));
 
+		// the name is spelled out: the constant does not exist when phpredis is built without igbinary support
+		$igbinary = defined('Redis::SERIALIZER_IGBINARY');
 		self::assertSame(
-			extension_loaded('igbinary') ? \Redis::SERIALIZER_IGBINARY : \Redis::SERIALIZER_PHP,
+			$igbinary ? constant('Redis::SERIALIZER_IGBINARY') : \Redis::SERIALIZER_PHP,
 			$redis->getOption(\Redis::OPT_SERIALIZER),
 		);
+
+		// CI states which build it expects, so that a job cannot silently test the other serializer
+		$expected = getenv('REDIS_TEST_EXPECT_IGBINARY');
+		if ($expected !== false) {
+			self::assertSame($expected === '1', $igbinary, 'Unexpected igbinary support in phpredis.');
+		}
 
 		$redis->set('key', ['structured' => true]);
 		self::assertSame(['structured' => true], $redis->get('key'));

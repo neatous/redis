@@ -26,10 +26,10 @@ class RedisFactory
 			throw new \RedisException("Cannot select Redis database {$config->database}.");
 		}
 
-		$serializer = extension_loaded('igbinary')
-			? \Redis::SERIALIZER_IGBINARY
-			: \Redis::SERIALIZER_PHP;
-		$redis->setOption(\Redis::OPT_SERIALIZER, $serializer);
+		$serializer = Serializer::igbinary() ?? \Redis::SERIALIZER_PHP;
+		if ($redis->setOption(\Redis::OPT_SERIALIZER, $serializer) !== true) {
+			throw new \RedisException('Cannot set the Redis serializer.');
+		}
 
 		return $redis;
 	}

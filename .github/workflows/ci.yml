@@ -71,9 +71,60 @@ jobs:
 
       - name: Run tests
         run: vendor/bin/phpunit --display-skipped
+        env:
+          REDIS_TEST_EXPECT_IGBINARY: 1
 
       - name: Run tests with the PHP serializer
         run: REDIS_TEST_SERIALIZER=php vendor/bin/phpunit
+
+  tests-without-igbinary:
+    name: Tests (PHP ${{ matrix.php }}, phpredis without igbinary)
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP (Composer only)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: redis
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --no-interaction --no-progress
+
+      # igbinary is loaded on purpose, phpredis is built without its support
+      - name: Run tests with phpredis built without igbinary
+        run: |
+          docker run --rm --network host -v "$PWD:/app" -w /app -e REDIS_TEST_EXPECT_IGBINARY=0 \
+            php:${{ matrix.php }}-cli-alpine sh -euc '
+              apk add --no-cache $PHPIZE_DEPS
+              pecl install igbinary
+              docker-php-ext-enable igbinary
+              pecl install -D "enable-redis-igbinary=\"no\"" redis
+              docker-php-ext-enable redis
+              php -r "exit((int) (!extension_loaded(\"redis\") || defined(\"Redis::SERIALIZER_IGBINARY\")));"
+              php vendor/bin/phpunit --display-skipped
+            '
 
   phpstan:
     name: PHPStan

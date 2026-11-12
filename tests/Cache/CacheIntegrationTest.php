@@ -33,7 +33,7 @@ final class CacheIntegrationTest extends TestCase
 		}
 
 		try {
-			// the production client: igbinary serializer when the extension is loaded, PHP serializer otherwise
+			// the production client: igbinary serializer when phpredis supports it, PHP serializer otherwise
 			$this->redis = TestSerializer::apply((new RedisFactory())->create(
 				new RedisConfig('127.0.0.1', 6379, null, 15, 1.0, false, self::PREFIX),
 			));

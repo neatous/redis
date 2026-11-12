@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netous\Redis\Cache;
 
+use Netous\Redis\Client\Serializer;
 use Nette\Caching\Cache;
 use Nette\Caching\Storage;
 use Nette\Caching\Storages\Journal;
@@ -67,8 +68,7 @@ final class RedisStorage implements Storage
 			throw new InvalidArgumentException("Default TTL must be at least 1 second or null, $defaultTtl given.");
 		}
 
-		$serializer = $redis->getOption(\Redis::OPT_SERIALIZER);
-		if (!in_array($serializer, [\Redis::SERIALIZER_PHP, \Redis::SERIALIZER_IGBINARY], true)) {
+		if (!Serializer::restoresObjects($redis->getOption(\Redis::OPT_SERIALIZER))) {
 			throw new InvalidArgumentException(
 				'Redis connection must use the PHP or igbinary serializer (Redis::OPT_SERIALIZER), which restore PHP '
 				. 'objects; create it with RedisFactory.',
