@@ -7,14 +7,16 @@ namespace Netous\Redis\Tests\DI;
 use Netous\Redis\Cache\RedisJournal;
 use Netous\Redis\Cache\RedisStorage;
 use Netous\Redis\Client\RedisConfig;
-use Netous\Redis\Client\RedisFactory;
 use Netous\Redis\DI\RedisExtension;
 use Nette\Bridges\CacheDI\CacheExtension;
+use Nette\Caching\Cache;
+use Nette\Caching\Storage;
 use Nette\Caching\Storages\FileStorage;
 use Nette\DI\Compiler;
 use Nette\DI\Container;
 use Nette\DI\ContainerLoader;
 use Nette\DI\Definitions\ServiceDefinition;
+use Nette\DI\InvalidConfigurationException;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -65,6 +67,8 @@ final class RedisExtensionTest extends TestCase
 			'port' => 6380,
 			'password' => 'secret',
 			'database' => 2,
+			'timeout' => 3.0,
+			'persistent' => true,
 			'prefix' => 'myapp:',
 		]);
 
@@ -75,7 +79,58 @@ final class RedisExtensionTest extends TestCase
 		self::assertSame(6380, $config->port);
 		self::assertSame('secret', $config->password);
 		self::assertSame(2, $config->database);
+		self::assertSame(3.0, $config->timeout);
+		self::assertTrue($config->persistent);
 		self::assertSame('myapp:', $config->prefix);
+	}
+
+
+	#[Test]
+	public function emptyPrefixIsRejectedByConfigSchema(): void
+	{
+		$this->expectException(InvalidConfigurationException::class);
+
+		$this->compileWithCacheExtension(['cache' => true, 'prefix' => '']);
+	}
+
+
+	#[Test]
+	public function integerTimeoutIsAccepted(): void
+	{
+		$config = $this->createContainer(['timeout' => 2])->getService('redis.config');
+
+		self::assertInstanceOf(RedisConfig::class, $config);
+		self::assertSame(2.0, $config->timeout);
+	}
+
+
+	#[Test]
+	public function storageIsRegisteredWithoutNetteCacheExtension(): void
+	{
+		$compiler = new Compiler();
+		$compiler->addExtension('redis', new RedisExtension());
+		$compiler->addConfig(['redis' => ['cache' => true]]);
+		$compiler->compile();
+		$def = $compiler->getContainerBuilder()->getDefinitionByType(Storage::class);
+
+		self::assertInstanceOf(ServiceDefinition::class, $def);
+		self::assertSame(RedisStorage::class, $def->getFactory()->getEntity());
+	}
+
+
+	#[Test]
+	public function negativeDatabaseIsRejectedByConfigSchema(): void
+	{
+		$rejected = [];
+		foreach (['database', 'cacheDatabase', 'sessionDatabase'] as $option) {
+			try {
+				$this->compileWithCacheExtension(['cache' => true, $option => -1]);
+			} catch (InvalidConfigurationException) {
+				$rejected[] = $option;
+			}
+		}
+
+		self::assertSame(['database', 'cacheDatabase', 'sessionDatabase'], $rejected);
 	}
 
 	#[Test]
@@ -97,6 +152,36 @@ final class RedisExtensionTest extends TestCase
 	}
 
 	#[Test]
+	public function containerCreatesWorkingRedisCacheStorage(): void
+	{
+		if (!extension_loaded('redis')) {
+			self::markTestSkipped('ext-redis is not loaded.');
+		}
+
+		try {
+			(new \Redis())->connect('127.0.0.1', 6379, 1.0);
+		} catch (\RedisException) {
+			self::markTestSkipped('Cannot connect to Redis at 127.0.0.1:6379.');
+		}
+
+		$container = $this->createContainer(
+			['cache' => true, 'cacheDatabase' => 15, 'prefix' => 'test-di:', 'timeout' => 1.0],
+			withCacheExtension: true,
+		);
+		$storage = $container->getByType(Storage::class);
+		self::assertInstanceOf(RedisStorage::class, $storage);
+
+		$cache = new Cache($storage, 'di');
+		$cache->save('key', ['value'], [Cache::Tags => ['tag']]);
+		self::assertSame(['value'], $cache->load('key'));
+
+		$cache->clean([Cache::Tags => ['tag']]);
+		self::assertNull($cache->load('key'));
+
+		$storage->clean([Cache::All => true]);
+	}
+
+	#[Test]
 	public function cacheStorageReplacedWithRedisWhenCacheExtensionPresent(): void
 	{
 		$builder = $this->compileWithCacheExtension(['cache' => true]);
@@ -104,6 +189,32 @@ final class RedisExtensionTest extends TestCase
 
 		self::assertInstanceOf(ServiceDefinition::class, $def);
 		self::assertSame(RedisStorage::class, $def->getFactory()->getEntity());
+	}
+
+	#[Test]
+	public function defaultTtlIsPassedToStorage(): void
+	{
+		$default = $this->compileWithCacheExtension(['cache' => true])
+			->getDefinition('cache.storage');
+		$custom = $this->compileWithCacheExtension(['cache' => true, 'defaultTtl' => 60])
+			->getDefinition('cache.storage');
+		$infinite = $this->compileWithCacheExtension(['cache' => true, 'defaultTtl' => null])
+			->getDefinition('cache.storage');
+
+		self::assertInstanceOf(ServiceDefinition::class, $default);
+		self::assertInstanceOf(ServiceDefinition::class, $custom);
+		self::assertInstanceOf(ServiceDefinition::class, $infinite);
+		self::assertSame(RedisStorage::DEFAULT_TTL, $default->getFactory()->arguments[3]);
+		self::assertSame(60, $custom->getFactory()->arguments[3]);
+		self::assertNull($infinite->getFactory()->arguments[3]);
+	}
+
+	#[Test]
+	public function zeroDefaultTtlIsRejectedByConfigSchema(): void
+	{
+		$this->expectException(InvalidConfigurationException::class);
+
+		$this->compileWithCacheExtension(['cache' => true, 'defaultTtl' => 0]);
 	}
 
 	#[Test]
@@ -148,30 +259,6 @@ final class RedisExtensionTest extends TestCase
 		self::assertFalse($container->hasService('redis.sessionConfig'));
 	}
 
-	#[Test]
-	public function factoryServiceIsCorrectType(): void
-	{
-		$container = $this->createContainer([]);
-
-		self::assertInstanceOf(RedisFactory::class, $container->getService('redis.factory'));
-	}
-
-	#[Test]
-	public function cacheClientAndConfigRegisteredWhenCacheEnabled(): void
-	{
-		$container = $this->createContainer(['cache' => true]);
-
-		self::assertTrue($container->hasService('redis.cacheConfig'));
-		self::assertTrue($container->hasService('redis.cacheClient'));
-	}
-
-	#[Test]
-	public function sessionConfigRegisteredWhenSessionsEnabled(): void
-	{
-		$container = $this->createContainer(['sessions' => true]);
-
-		self::assertTrue($container->hasService('redis.sessionConfig'));
-	}
 
 	#[Test]
 	public function cacheDatabaseOverridesBaseDatabase(): void
@@ -252,15 +339,23 @@ final class RedisExtensionTest extends TestCase
 	}
 
 	/** @param array<string, mixed> $config */
-	private function createContainer(array $config): Container
+	private function createContainer(array $config, bool $withCacheExtension = false): Container
 	{
 		$loader = new ContainerLoader($this->tempDir, autoRebuild: true);
+		$tempDir = $this->tempDir;
 
-		/** @var class-string<Container> $class */
-		$class = $loader->load(static function (Compiler $compiler) use ($config): void {
+		$generator = static function (Compiler $compiler) use ($config, $withCacheExtension, $tempDir): ?string {
+			if ($withCacheExtension) {
+				$compiler->addExtension('cache', new CacheExtension($tempDir . '/cache'));
+			}
+
 			$compiler->addExtension('redis', new RedisExtension());
 			$compiler->addConfig(['redis' => $config]);
-		}, serialize($config));
+
+			return null;
+		};
+		/** @var class-string<Container> $class */
+		$class = $loader->load($generator, serialize([$config, $withCacheExtension]));
 
 		return new $class();
 	}

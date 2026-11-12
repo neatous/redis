@@ -9,117 +9,122 @@ use Netous\Redis\Client\RedisFactory;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Runs the real factory against a live Redis.
+ */
 final class RedisFactoryTest extends TestCase
 {
-	#[Test]
-	public function createConnectsWithDefaults(): void
+	private const int DATABASE = 15;
+
+
+	protected function setUp(): void
 	{
-		$config = new RedisConfig();
-		$redis = $this->createMock(\Redis::class);
+		if (!extension_loaded('redis')) {
+			self::markTestSkipped('ext-redis is not loaded.');
+		}
 
-		$redis->expects(self::once())
-			->method('connect')
-			->with('127.0.0.1', 6379, 1.5);
-
-		$redis->expects(self::never())
-			->method('pconnect');
-
-		$redis->expects(self::never())
-			->method('auth');
-
-		$redis->expects(self::once())
-			->method('select')
-			->with(0);
-
-		$redis->expects(self::once())
-			->method('setOption')
-			->with(\Redis::OPT_SERIALIZER, self::anything());
-
-		$factory = new class ($redis) extends RedisFactory {
-			public function __construct(private readonly \Redis $mock)
-			{
-			}
-
-			public function create(RedisConfig $config): \Redis
-			{
-				if ($config->persistent) {
-					$this->mock->pconnect($config->host, $config->port, $config->timeout);
-				} else {
-					$this->mock->connect($config->host, $config->port, $config->timeout);
-				}
-
-				if ($config->password !== null) {
-					$this->mock->auth($config->password);
-				}
-
-				$this->mock->select($config->database);
-
-				$serializer = extension_loaded('igbinary')
-					? \Redis::SERIALIZER_IGBINARY
-					: \Redis::SERIALIZER_PHP;
-				$this->mock->setOption(\Redis::OPT_SERIALIZER, $serializer);
-
-				return $this->mock;
-			}
-		};
-
-		$result = $factory->create($config);
-		self::assertSame($redis, $result);
+		try {
+			(new \Redis())->connect('127.0.0.1', 6379, 1.0);
+		} catch (\RedisException) {
+			self::markTestSkipped('Cannot connect to Redis at 127.0.0.1:6379.');
+		}
 	}
+
+
+	protected function tearDown(): void
+	{
+		$redis = new \Redis();
+		$redis->connect('127.0.0.1', 6379, 1.0);
+		$redis->select(self::DATABASE);
+		$redis->flushDb();
+	}
+
+
+	#[Test]
+	public function createSelectsDatabaseAndEnablesSerializer(): void
+	{
+		$redis = (new RedisFactory())->create(new RedisConfig(database: self::DATABASE, timeout: 1.0));
+
+		self::assertSame(
+			extension_loaded('igbinary') ? \Redis::SERIALIZER_IGBINARY : \Redis::SERIALIZER_PHP,
+			$redis->getOption(\Redis::OPT_SERIALIZER),
+		);
+
+		$redis->set('key', ['structured' => true]);
+		self::assertSame(['structured' => true], $redis->get('key'));
+
+		$plain = new \Redis();
+		$plain->connect('127.0.0.1', 6379, 1.0);
+		$plain->select(self::DATABASE);
+		self::assertIsString($plain->get('key'), 'The value must be in the selected database, serialized.');
+	}
+
 
 	#[Test]
 	public function createWithPersistentConnection(): void
 	{
-		$config = new RedisConfig(persistent: true, password: 'secret', database: 3);
-		$redis = $this->createMock(\Redis::class);
+		$factory = new RedisFactory();
+		$persistent = new RedisConfig(database: self::DATABASE, timeout: 1.0, persistent: true);
+		$regular = new RedisConfig(database: self::DATABASE, timeout: 1.0);
 
-		$redis->expects(self::never())
-			->method('connect');
+		// persistent connections are reused by the next client in the same process, regular ones are not
+		self::assertSame(
+			$factory->create($persistent)->rawCommand('CLIENT', 'ID'),
+			$factory->create($persistent)->rawCommand('CLIENT', 'ID'),
+		);
+		self::assertNotSame(
+			$factory->create($regular)->rawCommand('CLIENT', 'ID'),
+			$factory->create($regular)->rawCommand('CLIENT', 'ID'),
+		);
+	}
 
-		$redis->expects(self::once())
-			->method('pconnect')
-			->with('127.0.0.1', 6379, 1.5);
 
-		$redis->expects(self::once())
-			->method('auth')
-			->with('secret');
+	#[Test]
+	public function persistentClientsOfDifferentDatabasesDoNotShareSocketWithoutPooling(): void
+	{
+		$pooling = ini_get('redis.pconnect.pooling_enabled');
+		if ($pooling === false || ini_set('redis.pconnect.pooling_enabled', '0') === false) {
+			self::markTestSkipped('redis.pconnect.pooling_enabled cannot be changed at runtime.');
+		}
 
-		$redis->expects(self::once())
-			->method('select')
-			->with(3);
+		try {
+			$factory = new RedisFactory();
+			$first = $factory->create(new RedisConfig(database: self::DATABASE, timeout: 1.0, persistent: true));
+			$second = $factory->create(new RedisConfig(database: self::DATABASE - 1, timeout: 1.0, persistent: true));
 
-		$redis->expects(self::once())
-			->method('setOption');
+			$second->flushDb();
+			$first->set('isolation', 'first');
 
-		$factory = new class ($redis) extends RedisFactory {
-			public function __construct(private readonly \Redis $mock)
-			{
+			self::assertNotSame($first->rawCommand('CLIENT', 'ID'), $second->rawCommand('CLIENT', 'ID'));
+			self::assertFalse($second->get('isolation'));
+			self::assertSame('first', $first->get('isolation'));
+		} finally {
+			ini_set('redis.pconnect.pooling_enabled', $pooling);
+			if (isset($second)) {
+				$second->flushDb();
 			}
+		}
+	}
 
-			public function create(RedisConfig $config): \Redis
-			{
-				if ($config->persistent) {
-					$this->mock->pconnect($config->host, $config->port, $config->timeout);
-				} else {
-					$this->mock->connect($config->host, $config->port, $config->timeout);
-				}
 
-				if ($config->password !== null) {
-					$this->mock->auth($config->password);
-				}
+	#[Test]
+	public function createFailsWhenDatabaseCannotBeSelected(): void
+	{
+		// phpredis only returns false for a rejected SELECT; silently staying on DB 0 must not happen
+		$this->expectException(\RedisException::class);
+		$this->expectExceptionMessageMatches('~database 100000~');
 
-				$this->mock->select($config->database);
+		(new RedisFactory())->create(new RedisConfig(database: 100000, timeout: 1.0));
+	}
 
-				$serializer = extension_loaded('igbinary')
-					? \Redis::SERIALIZER_IGBINARY
-					: \Redis::SERIALIZER_PHP;
-				$this->mock->setOption(\Redis::OPT_SERIALIZER, $serializer);
 
-				return $this->mock;
-			}
-		};
+	#[Test]
+	public function createSendsPassword(): void
+	{
+		// the test server has no password, so a sent AUTH fails; an ignored password would not
+		$this->expectException(\RedisException::class);
+		$this->expectExceptionMessageMatches('~AUTH~');
 
-		$result = $factory->create($config);
-		self::assertSame($redis, $result);
+		(new RedisFactory())->create(new RedisConfig(password: 'secret', database: self::DATABASE, timeout: 1.0));
 	}
 }

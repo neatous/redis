@@ -11,6 +11,7 @@ use Netous\Redis\Client\RedisConfig;
 use Netous\Redis\Client\RedisFactory;
 use Netous\Redis\Session\RedisSessionConfigurator;
 use Netous\Redis\Tracy\RedisPanel;
+use Nette\Caching\Storage;
 use Nette\DI\CompilerExtension;
 use Nette\DI\Definitions\Statement;
 use Nette\Schema\Expect;
@@ -24,15 +25,17 @@ final class RedisExtension extends CompilerExtension
 			'host' => Expect::string('127.0.0.1'),
 			'port' => Expect::int(6379),
 			'password' => Expect::string()->nullable(),
-			'database' => Expect::int(0),
-			'timeout' => Expect::float(1.5),
+			'database' => Expect::int(0)->min(0),
+			'timeout' => Expect::anyOf(Expect::float(), Expect::int())->default(1.5)->castTo('float'),
 			'persistent' => Expect::bool(false),
-			'prefix' => Expect::string('app:'),
+			'prefix' => Expect::string('app:')
+				->assert(static fn (mixed $prefix): bool => $prefix !== '', 'Prefix must not be empty'),
 			'cache' => Expect::bool(false),
 			'journal' => Expect::bool(true),
+			'defaultTtl' => Expect::int(RedisStorage::DEFAULT_TTL)->min(1)->nullable(),
 			'sessions' => Expect::bool(false),
-			'cacheDatabase' => Expect::int()->nullable(),
-			'sessionDatabase' => Expect::int()->nullable(),
+			'cacheDatabase' => Expect::int()->min(0)->nullable(),
+			'sessionDatabase' => Expect::int()->min(0)->nullable(),
 			'debug' => Expect::bool(false),
 		]);
 	}
@@ -40,7 +43,7 @@ final class RedisExtension extends CompilerExtension
 	public function loadConfiguration(): void
 	{
 		$builder = $this->getContainerBuilder();
-		/** @var object{host: string, port: int, password: ?string, database: int, timeout: float, persistent: bool, prefix: string, cache: bool, journal: bool, sessions: bool, cacheDatabase: ?int, sessionDatabase: ?int} $config */
+		/** @var object{host: string, port: int, password: ?string, database: int, timeout: float, persistent: bool, prefix: string, cache: bool, journal: bool, defaultTtl: ?int, sessions: bool, cacheDatabase: ?int, sessionDatabase: ?int} $config */
 		$config = $this->config;
 
 		$configDef = $builder->addDefinition($this->prefix('config'))
@@ -111,7 +114,7 @@ final class RedisExtension extends CompilerExtension
 
 	public function beforeCompile(): void
 	{
-		/** @var object{host: string, port: int, password: ?string, database: int, timeout: float, persistent: bool, prefix: string, cache: bool, journal: bool, sessions: bool, cacheDatabase: ?int, sessionDatabase: ?int, debug: bool} $config */
+		/** @var object{host: string, port: int, password: ?string, database: int, timeout: float, persistent: bool, prefix: string, cache: bool, journal: bool, defaultTtl: ?int, sessions: bool, cacheDatabase: ?int, sessionDatabase: ?int, debug: bool} $config */
 		$config = $this->config;
 		$builder = $this->getContainerBuilder();
 
@@ -119,12 +122,19 @@ final class RedisExtension extends CompilerExtension
 			$storageDef = $builder->hasDefinition('cache.storage')
 				? $builder->getDefinition('cache.storage')
 				: null;
+			$storageArgs = [
+				$this->prefix('@cacheClient'),
+				$this->prefix('@keyBuilder'),
+				$config->journal ? $this->prefix('@journal') : null,
+				$config->defaultTtl,
+			];
 			if ($storageDef instanceof \Nette\DI\Definitions\ServiceDefinition) {
-				$storageDef->setFactory(RedisStorage::class, [
-					$this->prefix('@cacheClient'),
-					$this->prefix('@keyBuilder'),
-					$config->journal ? $this->prefix('@journal') : null,
-				]);
+				$storageDef->setFactory(RedisStorage::class, $storageArgs);
+			} elseif ($storageDef === null) {
+				// no Nette CacheExtension: register the storage ourselves instead of silently doing nothing
+				$builder->addDefinition($this->prefix('storage'))
+					->setType(Storage::class)
+					->setFactory(RedisStorage::class, $storageArgs);
 			}
 
 			if ($config->journal && $builder->hasDefinition('cache.journal')) {
