@@ -4,207 +4,92 @@
 	neatous/redis
 </h1>
 
-Minimalist Redis integration for Nette Framework — cache storage and session handler using the phpredis extension. Designed for zero overhead with O(1) namespace invalidation.
+Redis cache storage and sessions for Nette, using phpredis.
 
 ## Requirements
 
-- PHP 8.4+
-- ext-redis >= 6.0
-- Nette Framework 3.x
+- PHP 8.4+, ext-redis 6.0+ (ext-igbinary optional, used when available)
+- `nette/caching` 3.3.1+ or 4.x, `nette/di` 3.2.3+
+- Redis 4+, standalone (no Cluster), Lua scripting allowed
 
-Optional: `ext-igbinary` for faster serialization (auto-detected).
+Upgrading from 0.9? See [UPGRADE.md](UPGRADE.md).
 
 ## Installation
 
 ```bash
-composer require netous/redis
+composer require neatous/redis
 ```
-
-## Configuration
-
-Register the extension in your NEON config:
 
 ```neon
 extensions:
     redis: Netous\Redis\DI\RedisExtension
 
 redis:
-    host: 127.0.0.1
     cache: true
     sessions: true
 ```
 
-All options are optional — defaults are shown below.
+## Options
 
-### Options
+| Option | Default | Description |
+|---|---|---|
+| `host` | `127.0.0.1` | Redis host |
+| `port` | `6379` | Redis port |
+| `password` | `null` | Redis password |
+| `database` | `0` | Database index |
+| `cacheDatabase` | `null` | Database for the cache (default `database`) |
+| `sessionDatabase` | `null` | Database for sessions (default `database`) |
+| `timeout` | `1.5` | Connection timeout in seconds |
+| `persistent` | `false` | Persistent connections |
+| `prefix` | `app:` | Key prefix — unique per application, not nested in another application's prefix |
+| `cache` | `false` | Use Redis as the Nette cache storage |
+| `journal` | `true` | Enable `Cache::Tags` and `Cache::Priority` |
+| `defaultTtl` | `3600` | Lifetime of items without `Cache::Expire`; `null` = until invalidated |
+| `sessions` | `false` | Store PHP sessions in Redis |
+| `debug` | `false` | Tracy panel (requires `tracy/tracy`) |
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `host` | string | `127.0.0.1` | Redis server hostname |
-| `port` | int | `6379` | Redis server port |
-| `password` | string\|null | `null` | Authentication password |
-| `database` | int | `0` | Redis database index |
-| `timeout` | float | `1.5` | Connection timeout in seconds |
-| `persistent` | bool | `false` | Use persistent connections |
-| `prefix` | string | `"app:"` | Key prefix for all Redis keys |
-| `cache` | bool | `false` | Register as Nette cache storage |
-| `journal` | bool | `true` | Register `RedisJournal` for tag/priority invalidation (only applies when `cache: true`) |
-| `sessions` | bool | `false` | Configure PHP sessions to use Redis |
-| `cacheDatabase` | int\|null | `null` | Redis database index for cache (falls back to `database`) |
-| `sessionDatabase` | int\|null | `null` | Redis database index for sessions (falls back to `database`) |
-| `debug` | bool | `false` | Show Tracy debug panel |
+## Cache
 
-### Separate databases
+All `Nette\Caching\Cache` instances use Redis. All dependencies are supported (`Expire`, `Sliding`, `Tags`,
+`Priority`, `Files`, `Constants`, `Callbacks`, `Items`; `Sliding` needs `Expire`).
 
-To prevent a cache flush from destroying active user sessions, configure separate Redis databases:
-
-```neon
-redis:
-    database: 0
-    cacheDatabase: 0
-    sessionDatabase: 1
-    cache: true
-    sessions: true
-```
-
-## Usage
-
-### Cache storage
-
-Enable `cache: true` in your config. The extension registers `RedisStorage` as the default `Nette\Caching\Storage` implementation, so all `Nette\Caching\Cache` instances will use Redis automatically.
+Run the garbage collector regularly, e.g. hourly from cron:
 
 ```php
-use Nette\Caching\Cache;
-
-class ProductService
-{
-    public function __construct(
-        private Cache $cache,
-    ) {
-    }
-
-    public function getProduct(int $id): Product
-    {
-        return $this->cache->load("product-$id", function () use ($id) {
-            return $this->repository->find($id);
-        });
-    }
-}
+$container->getByType(Nette\Caching\Storage::class)->clean([]);
 ```
 
-### Sessions
-
-Enable `sessions: true` in your config. PHP sessions will be stored in Redis using the native phpredis session handler. No additional code changes are needed.
-
-### Standalone usage
-
-You can use the Redis client and cache storage without the Nette DI extension:
+Without the extension:
 
 ```php
-use Netous\Redis\Client\RedisConfig;
-use Netous\Redis\Client\RedisFactory;
-use Netous\Redis\Cache\RedisKeyBuilder;
-use Netous\Redis\Cache\RedisStorage;
-
-$config = new RedisConfig(
-    host: '10.0.0.1',
-    password: 'secret',
-    database: 2,
-    prefix: 'myapp:',
+$redis = (new Netous\Redis\Client\RedisFactory())->create(new Netous\Redis\Client\RedisConfig(prefix: 'myapp:'));
+$storage = new Netous\Redis\Cache\RedisStorage(
+    $redis,
+    new Netous\Redis\Cache\RedisKeyBuilder('myapp:'),
+    new Netous\Redis\Cache\RedisJournal($redis, 'myapp:'), // same connection
 );
-
-$redis = (new RedisFactory())->create($config);
-$keyBuilder = new RedisKeyBuilder($config->prefix);
-$journal = new \Netous\Redis\Cache\RedisJournal($redis, $config->prefix);
-$storage = new RedisStorage($redis, $keyBuilder, $journal);
 ```
 
-## Tracy panel
+## Notes
 
-When enabled, a Redis panel is added to the Tracy debug bar showing connection status, ping latency, key count, and memory usage for each registered connection (client, cache, session).
-
-```neon
-redis:
-    debug: true
-```
-
-Requires `tracy/tracy`:
-
-```bash
-composer require tracy/tracy
-```
-
-## How it works
-
-### Key format
-
-Cache keys are stored as:
-
-```
-{prefix}cache:{namespace}:{version}:{sha1(key)}
-```
-
-The SHA-1 hash ensures safe, fixed-length keys regardless of the original key content.
-
-### Tag and priority invalidation (Journal)
-
-When `cache: true` is enabled, the extension also registers `RedisJournal` as the `Nette\Caching\Storages\Journal` implementation by default. This enables cache invalidation by tags and priorities:
-
-```php
-// Writing with tags and priority
-$cache->save('product-42', $data, [
-    Cache::Tags => ['product', 'category-5'],
-    Cache::Priority => 50,
-]);
-
-// Invalidate all entries tagged with "product"
-$cache->clean([Cache::Tags => ['product']]);
-
-// Invalidate all entries with priority <= 30
-$cache->clean([Cache::Priority => 30]);
-```
-
-The journal stores metadata in Redis using SETs (for tag→key and key→tag mappings) and a SORTED SET (for priorities). When a cache entry is rewritten, its previous journal entries are automatically cleaned up.
-
-If you don't use tags or priorities, you can disable the journal to avoid the overhead:
-
-```neon
-redis:
-    cache: true
-    journal: false
-```
-
-### Namespace invalidation
-
-Namespaces are invalidated in O(1) time using a version counter. Each namespace has a version key:
-
-```
-{prefix}cache:ns:{namespace}
-```
-
-When a namespace is cleaned, the version is incremented with `INCR`. All existing keys for the previous version become orphaned and expire naturally via their TTL. No `KEYS` or `SCAN` commands are used.
-
-### Redis commands used
-
-The implementation uses a minimal set of Redis commands:
-
-- `GET` — read cache entries and namespace versions
-- `SETEX` — write cache entries with TTL
-- `DEL` — remove individual cache entries
-- `INCR` — increment namespace version for O(1) invalidation
-
-### Serialization
-
-If the `igbinary` extension is available, it is used automatically for Redis value serialization. Otherwise, PHP's native serializer is used as a fallback.
+- `Cache::All` deletes only this library's keys (`{prefix}cache…`, `{prefix}journal:`); sessions and other data stay.
+- With the journal, set `maxmemory-policy` to `volatile-*` (recommended) or `noeviction` (a full Redis then makes cache
+  writes throw); `allkeys-*` may evict journal keys and break tag invalidation.
+- Anyone who can write to your Redis can run code in your application (cached data is unserialized, `Cache::Callbacks`
+  are executed). Protect Redis with a password/ACL and keep it off untrusted networks.
+- Sessions: the Redis password is part of `session.save_path`, which `phpinfo()` and Tracy's error page show. Restrict
+  access to Tracy logs or set `Tracy\Debugger::getBlueScreen()->showEnvironment = false`.
+- A custom connection must use the PHP or igbinary serializer and no `Redis::OPT_PREFIX`; compression is supported.
 
 ## Testing
 
 ```bash
 composer install
 vendor/bin/phpunit
+REDIS_TEST_SERIALIZER=php vendor/bin/phpunit
 ```
 
-A running Redis server on `127.0.0.1:6379` is expected for integration tests.
+Requires Redis on `127.0.0.1:6379`. **The tests flush databases 14 and 15.**
 
 ## License
 
