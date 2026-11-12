@@ -5,15 +5,41 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   tests:
-    name: Tests (PHP ${{ matrix.php }})
+    name: Tests (PHP ${{ matrix.php }}, nette/caching ${{ matrix.caching }}, ${{ matrix.dependencies }} deps)
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
       fail-fast: false
       matrix:
         php: ['8.4', '8.5']
+        caching: ['^3.3.1', '^4.0']
+        dependencies: [highest]
+        experimental: [false]
+        include:
+          # the lowest versions allowed by composer.json (on the lowest supported PHP)
+          - php: '8.4'
+            caching: '^3.3.1'
+            dependencies: lowest
+            experimental: false
+          - php: '8.4'
+            caching: '^4.0'
+            dependencies: lowest
+            experimental: false
+          # PHP 8.6 is not stable yet; failures (e.g. redis/igbinary not yet buildable) do not fail the workflow
+          - php: '8.6'
+            caching: '^3.3.1'
+            dependencies: highest
+            experimental: true
+          - php: '8.6'
+            caching: '^4.0'
+            dependencies: highest
+            experimental: true
 
     services:
       redis:
@@ -28,6 +54,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -37,10 +65,15 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress
+        run: |
+          composer require "nette/caching:${{ matrix.caching }}" --no-update --no-interaction
+          composer update --no-interaction --no-progress --with-all-dependencies ${{ matrix.dependencies == 'lowest' && '--prefer-lowest --prefer-stable' || '' }}
 
       - name: Run tests
-        run: vendor/bin/phpunit
+        run: vendor/bin/phpunit --display-skipped
+
+      - name: Run tests with the PHP serializer
+        run: REDIS_TEST_SERIALIZER=php vendor/bin/phpunit
 
   phpstan:
     name: PHPStan
@@ -48,6 +81,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -57,7 +92,7 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress
+        run: composer update --no-interaction --no-progress
 
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse
@@ -68,6 +103,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -76,7 +113,7 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress
+        run: composer update --no-interaction --no-progress
 
       - name: Run PHP_CodeSniffer
         run: vendor/bin/phpcs
